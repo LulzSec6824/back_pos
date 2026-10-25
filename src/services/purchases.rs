@@ -312,12 +312,7 @@ pub async fn receive_delivery(
                 .items
                 .iter()
                 .filter(|item| item.quantity_received > 0)
-                .map(|item| {
-                    (
-                        item.purchase_order_item_id.clone(),
-                        item.quantity_received,
-                    )
-                })
+                .map(|item| (item.purchase_order_item_id.clone(), item.quantity_received))
                 .collect()
         };
 
