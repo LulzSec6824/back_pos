@@ -1,2 +1,9 @@
+pub mod customer;
+pub mod inventory;
+pub mod misc;
+pub mod notification;
 pub mod product;
+pub mod purchases;
+pub mod report;
+pub mod sales;
 pub mod user;
