@@ -1,5 +1,9 @@
+# IDE settings
 /target
 .trae
 .vscode
 .idea
 .vs
+
+# Secrets
+.env
