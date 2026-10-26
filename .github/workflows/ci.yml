@@ -1,0 +1,266 @@
+# Compiles on every push / pull request. Pushing a version tag builds release
+# binaries for Linux, Windows and macOS and publishes them to a GitHub Release:
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+#
+# Tags containing a hyphen (e.g. v0.1.0-dev.1) are published as pre-releases.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Always compile the backend. Runs on every branch push, pull request and
+  # manually started workflow. Tag pushes run this too, and every release job
+  # below waits for it to pass.
+  # ---------------------------------------------------------------------------
+  compile:
+    name: Compile & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-linux
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test
+        run: cargo test --locked
+
+  # ---------------------------------------------------------------------------
+  # Release builds. These only run when a tag starting with "v" is pushed
+  # (or when the workflow is manually started on such a tag).
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Linux x86_64
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: compile
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-linux-x86_64
+
+      - name: Build release binary
+        run: cargo build --locked --release --target x86_64-unknown-linux-gnu
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="back_pos-${VERSION}-linux-x86_64"
+          mkdir -p "dist/${NAME}"
+          install -m 755 "target/x86_64-unknown-linux-gnu/release/back_pos" "dist/${NAME}/back_pos"
+          cp .env.example "dist/${NAME}/.env.example"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "${NAME}"
+          ls -lh "dist/${NAME}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-x86_64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Windows x86_64
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: compile
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-windows-x86_64
+
+      - name: Build release binary
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $name = "back_pos-$version-windows-x86_64"
+          $packageDir = Join-Path "dist" $name
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/back_pos.exe" (Join-Path $packageDir "back_pos.exe")
+          Copy-Item ".env.example" (Join-Path $packageDir ".env.example")
+          Compress-Archive -Path $packageDir -DestinationPath (Join-Path "dist" "$name.zip") -Force
+          Get-ChildItem "dist" | Format-Table Name, Length -AutoSize
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-x86_64
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: macOS universal (Intel + Apple Silicon)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: compile
+    runs-on: macos-latest
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos-universal
+
+      - name: Build Apple Silicon binary
+        run: cargo build --locked --release --target aarch64-apple-darwin
+
+      - name: Build Intel binary
+        run: cargo build --locked --release --target x86_64-apple-darwin
+
+      - name: Package universal binary
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="back_pos-${VERSION}-macos-universal"
+          mkdir -p "dist/${NAME}"
+          lipo -create \
+            "target/aarch64-apple-darwin/release/back_pos" \
+            "target/x86_64-apple-darwin/release/back_pos" \
+            -output "dist/${NAME}/back_pos"
+          chmod +x "dist/${NAME}/back_pos"
+          cp .env.example "dist/${NAME}/.env.example"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "${NAME}"
+          lipo -info "dist/${NAME}/back_pos"
+          ls -lh "dist/${NAME}.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-universal
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Publish all three binaries in one GitHub release. Release notes contain the
+  # tag, version, commit and build timestamp, plus GitHub's generated notes.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - compile
+      - build-linux
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          sha256sum back_pos-*.tar.gz back_pos-*.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Extract release metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+          echo "built_at=$(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: BackPOS ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            ## Release metadata
+
+            | | |
+            | --- | --- |
+            | Tag | `${{ github.ref_name }}` |
+            | Version | `${{ steps.meta.outputs.version }}` |
+            | Commit | [`${{ steps.meta.outputs.short_sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }}) |
+            | Built | ${{ steps.meta.outputs.built_at }} |
+
+            ## Downloads
+
+            | Platform | File |
+            | --- | --- |
+            | Linux x86_64 (glibc 2.35+) | `back_pos-${{ steps.meta.outputs.version }}-linux-x86_64.tar.gz` |
+            | Windows x86_64 | `back_pos-${{ steps.meta.outputs.version }}-windows-x86_64.zip` |
+            | macOS (Intel + Apple Silicon) | `back_pos-${{ steps.meta.outputs.version }}-macos-universal.tar.gz` |
+
+            Each archive contains the `back_pos` binary and `.env.example`.
+            Verify downloads with `SHA256SUMS.txt`.
+          files: |
+            artifacts/back_pos-*.tar.gz
+            artifacts/back_pos-*.zip
+            artifacts/SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
