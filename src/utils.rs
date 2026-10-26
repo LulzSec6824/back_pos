@@ -21,9 +21,9 @@ pub fn verify_secret(plain: &str, hash: &str) -> bool {
 }
 
 /// HTTP-only money rounding helper: rounds a decimal to 2 fraction digits,
-/// banker-free (half-up), suitable for receipt totals.
+/// half-up (away from zero), suitable for receipt totals.
 pub fn round2(value: Decimal) -> Decimal {
-    value.round_dp(2)
+    value.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 
 /// Generate receipt / PO document numbers: `PREFIX-YYYYMMDD-RRRRRR`.

@@ -55,7 +55,20 @@ pub async fn create_purchase_order(
     let mut tx = pool.begin().await.map_err(AppError::db)?;
 
     let store_id = match &input.store_id {
-        Some(store_id) => store_id.clone(),
+        Some(store_id) => {
+            // Validate now so an unknown id is a 404 instead of an FK
+            // violation when the PO row is inserted below.
+            let store =
+                sqlx::query_scalar::<_, i64>("SELECT CAST(1 AS SIGNED) FROM `STORE` WHERE id = ?")
+                    .bind(store_id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(AppError::db)?;
+            if store.is_none() {
+                return Err(AppError::not_found(format!("Store {store_id} not found")));
+            }
+            store_id.clone()
+        }
         None => resolve_default_store(&mut tx, user).await?,
     };
 
@@ -205,11 +218,19 @@ pub async fn transition_purchase_order(
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(AppError::db)?;
+        // Verbs match the new status; appending "-ed" to the action would
+        // produce misspellings like "approveed"/"submited"/"canceled".
+        let verb = match next {
+            "SUBMITTED" => "submitted",
+            "APPROVED" => "approved",
+            "CANCELLED" => "cancelled",
+            _ => action,
+        };
         crate::services::stock::insert_notification(
             &mut tx,
             crate::models::notification::CreateNotification {
                 type_name: "PO_STATUS".to_string(),
-                title: format!("Purchase order {po_number} {action}ed"),
+                title: format!("Purchase order {po_number} {verb}"),
                 message: format!("Purchase order {po_number} moved from {current} to {next}."),
                 audience: "ALL".to_string(),
                 entity_type: Some("PURCHASE_ORDER".to_string()),

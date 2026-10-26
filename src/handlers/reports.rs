@@ -25,22 +25,30 @@ pub struct ReportQuery {
 fn date_clause(
     from: &Option<chrono::NaiveDate>,
     to: &Option<chrono::NaiveDate>,
+    alias: &str,
 ) -> (String, Vec<String>) {
     // Dates arrive as NaiveDate; compare against the date part of created_at.
+    // `alias` is the TRANSACTION table alias: in top_products/profit the main
+    // table `t` is TRANSACTION_ITEM, which has no created_at of its own.
     let mut clause = String::new();
     let mut binds = Vec::new();
     if let Some(from) = from {
-        clause.push_str(" AND DATE(t.created_at) >= ?");
+        clause.push_str(&format!(" AND DATE({alias}.created_at) >= ?"));
         binds.push(from.to_string());
     }
     if let Some(to) = to {
-        clause.push_str(" AND DATE(t.created_at) <= ?");
+        clause.push_str(&format!(" AND DATE({alias}.created_at) <= ?"));
         binds.push(to.to_string());
     }
     (clause, binds)
 }
 
-const STATUS_COMPLETED: &str = "t.status = 'COMPLETED'";
+/// Completed-status predicate. Every statement that has a TRANSACTION in the
+/// query joins it, but under different aliases — `t` here, `tr` in
+/// top_products/profit (where `t` is TRANSACTION_ITEM).
+fn status_completed_clause(alias: &str) -> String {
+    format!("{alias}.status = 'COMPLETED'")
+}
 
 /// Reports are management-only.
 async fn ensure_reporting(user: &AuthenticatedUser) -> Result<(), AppError> {
@@ -57,13 +65,14 @@ pub async fn daily_sales(
     let ReportQuery {
         from, to, store_id, ..
     } = query.into_inner();
-    let (date_clause, mut binds) = date_clause(&from, &to);
+    let (date_clause, mut binds) = date_clause(&from, &to, "t");
     let mut store_clause = String::new();
     if let Some(store_id) = &store_id {
         store_clause = " AND t.store_id = ?".to_string();
         binds.push(store_id.clone());
     }
 
+    let status_clause = status_completed_clause("t");
     let sql = format!(
         "SELECT DATE(t.created_at) AS day,
                 CAST(COUNT(*) AS SIGNED) AS transactions,
@@ -71,7 +80,7 @@ pub async fn daily_sales(
                 CAST(COALESCE(SUM(t.tax_total), 0) AS DECIMAL(14,2)) AS tax,
                 CAST(COALESCE(SUM(t.discount_total), 0) AS DECIMAL(14,2)) AS total_discount
          FROM `TRANSACTION` t
-         WHERE {STATUS_COMPLETED}{date_clause}{store_clause}
+         WHERE {status_clause}{date_clause}{store_clause}
          GROUP BY DATE(t.created_at)
          ORDER BY day DESC"
     );
@@ -101,13 +110,17 @@ pub async fn top_products(
         limit,
         ..
     } = query.into_inner();
-    let (date_clause, mut binds) = date_clause(&from, &to);
+    // `t` is TRANSACTION_ITEM; date/store/status filters must come from the
+    // joined TRANSACTION row (`tr`), which is the only table holding those
+    // columns.
+    let (date_clause, mut binds) = date_clause(&from, &to, "tr");
     let mut store_clause = String::new();
     if let Some(store_id) = &store_id {
-        store_clause = " AND t.store_id = ?".to_string();
+        store_clause = " AND tr.store_id = ?".to_string();
         binds.push(store_id.clone());
     }
     let limit = limit.unwrap_or(10).clamp(1, 100);
+    let status_clause = status_completed_clause("tr");
 
     let sql = format!(
         "SELECT t.product_id, p.sku, p.name,
@@ -117,7 +130,7 @@ pub async fn top_products(
          FROM `TRANSACTION_ITEM` t
          JOIN `TRANSACTION` tr ON tr.id = t.transaction_id
          JOIN `PRODUCT` p ON p.id = t.product_id
-         WHERE {STATUS_COMPLETED}{date_clause}{store_clause}
+         WHERE {status_clause}{date_clause}{store_clause}
          GROUP BY t.product_id, p.sku, p.name
          ORDER BY revenue DESC
          LIMIT ?"
@@ -145,12 +158,15 @@ pub async fn profit(
     let ReportQuery {
         from, to, store_id, ..
     } = query.into_inner();
-    let (date_clause, mut binds) = date_clause(&from, &to);
+    // `t` is TRANSACTION_ITEM; date/store/status filters must come from the
+    // joined TRANSACTION row (`tr`).
+    let (date_clause, mut binds) = date_clause(&from, &to, "tr");
     let mut store_clause = String::new();
     if let Some(store_id) = &store_id {
-        store_clause = " AND t.store_id = ?".to_string();
+        store_clause = " AND tr.store_id = ?".to_string();
         binds.push(store_id.clone());
     }
+    let status_clause = status_completed_clause("tr");
 
     let sql = format!(
         "SELECT
@@ -158,7 +174,7 @@ pub async fn profit(
             CAST(COALESCE(SUM(t.cost_price * t.quantity), 0) AS DECIMAL(14,2)) AS cost
          FROM `TRANSACTION_ITEM` t
          JOIN `TRANSACTION` tr ON tr.id = t.transaction_id
-         WHERE {STATUS_COMPLETED}{date_clause}{store_clause}"
+         WHERE {status_clause}{date_clause}{store_clause}"
     );
 
     let mut rows_query = sqlx::query_as::<_, ProfitRow>(sqlx::AssertSqlSafe(sql.clone()));
@@ -197,7 +213,8 @@ pub async fn employee_performance(
 ) -> Result<HttpResponse, AppError> {
     ensure_reporting(&user).await?;
     let ReportQuery { from, to, .. } = query.into_inner();
-    let (date_clause, binds) = date_clause(&from, &to);
+    let (date_clause, binds) = date_clause(&from, &to, "t");
+    let status_clause = status_completed_clause("t");
 
     let sql = format!(
         "SELECT u.id AS cashier_id, u.name,
@@ -205,7 +222,7 @@ pub async fn employee_performance(
                 CAST(COALESCE(SUM(t.grand_total), 0) AS DECIMAL(14,2)) AS revenue
          FROM `TRANSACTION` t
          JOIN `USER` u ON u.id = t.cashier_id
-         WHERE {STATUS_COMPLETED}{date_clause}
+         WHERE {status_clause}{date_clause}
          GROUP BY u.id, u.name
          ORDER BY revenue DESC"
     );

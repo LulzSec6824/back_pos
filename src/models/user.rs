@@ -15,12 +15,12 @@ pub enum Role {
 }
 
 impl Role {
-    pub const ALL: [Role; 5] = [
+    /// Staff accounts = every role except portal suppliers.
+    pub const STAFF: [Role; 4] = [
         Role::Admin,
         Role::Manager,
         Role::InventoryManager,
         Role::Cashier,
-        Role::Supplier,
     ];
 
     /// The exact string stored in the database enum.

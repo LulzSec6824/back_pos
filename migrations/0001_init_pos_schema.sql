@@ -149,7 +149,7 @@ CREATE TABLE `STOCK_BATCH` (
     CONSTRAINT pk_stock_batch PRIMARY KEY (id),
     CONSTRAINT fk_stock_batch_product FOREIGN KEY (product_id) REFERENCES `PRODUCT` (id),
     CONSTRAINT fk_stock_batch_store   FOREIGN KEY (store_id)   REFERENCES `STORE` (id),
-    CONSTRAINT idx_stock_batch_fifo INDEX (product_id, store_id, received_at)
+    INDEX idx_stock_batch_fifo (product_id, store_id, received_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- ---------------------------------------------------------------- procurement
@@ -195,7 +195,7 @@ CREATE TABLE `SUPPLIER_DELIVERY` (
     received_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_supplier_delivery PRIMARY KEY (id),
     CONSTRAINT fk_delivery_order    FOREIGN KEY (purchase_order_id) REFERENCES `PURCHASE_ORDER` (id),
-    CONSTRAINT idx_delivery_order   INDEX (purchase_order_id)
+    INDEX idx_delivery_order (purchase_order_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- ---------------------------------------------------------------- sales
@@ -218,8 +218,8 @@ CREATE TABLE `TRANSACTION` (
     CONSTRAINT fk_transaction_store    FOREIGN KEY (store_id)    REFERENCES `STORE` (id),
     CONSTRAINT fk_transaction_cashier  FOREIGN KEY (cashier_id)  REFERENCES `USER` (id),
     CONSTRAINT fk_transaction_customer FOREIGN KEY (customer_id) REFERENCES `CUSTOMER` (id),
-    CONSTRAINT idx_transaction_created INDEX (created_at),
-    CONSTRAINT idx_transaction_store_date INDEX (store_id, created_at)
+    INDEX idx_transaction_created (created_at),
+    INDEX idx_transaction_store_date (store_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE `TRANSACTION_ITEM` (
@@ -235,7 +235,7 @@ CREATE TABLE `TRANSACTION_ITEM` (
     CONSTRAINT pk_transaction_item PRIMARY KEY (id),
     CONSTRAINT fk_ti_transaction FOREIGN KEY (transaction_id) REFERENCES `TRANSACTION` (id) ON DELETE CASCADE,
     CONSTRAINT fk_ti_product     FOREIGN KEY (product_id)     REFERENCES `PRODUCT` (id),
-    CONSTRAINT idx_ti_product INDEX (product_id)
+    INDEX idx_ti_product (product_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- One-to-many: split payments (cash + card + digital wallet on one ticket).
@@ -269,7 +269,7 @@ CREATE TABLE `STOCK_ADJUSTMENT` (
     CONSTRAINT fk_adjustment_store   FOREIGN KEY (store_id)   REFERENCES `STORE` (id),
     CONSTRAINT fk_adjustment_batch   FOREIGN KEY (batch_id)   REFERENCES `STOCK_BATCH` (id),
     CONSTRAINT fk_adjustment_user    FOREIGN KEY (created_by) REFERENCES `USER` (id),
-    CONSTRAINT idx_adjustment_product_date INDEX (product_id, created_at)
+    INDEX idx_adjustment_product_date (product_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- ---------------------------------------------------------------- history
@@ -285,7 +285,7 @@ CREATE TABLE `PRODUCT_PRICE_HISTORY` (
     CONSTRAINT pk_product_price_history PRIMARY KEY (id),
     CONSTRAINT fk_price_history_product FOREIGN KEY (product_id) REFERENCES `PRODUCT` (id),
     CONSTRAINT fk_price_history_user    FOREIGN KEY (changed_by) REFERENCES `USER` (id),
-    CONSTRAINT idx_price_history_product INDEX (product_id, changed_at)
+    INDEX idx_price_history_product (product_id, changed_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- -----------------------------------------------------------------
@@ -301,7 +301,7 @@ CREATE TABLE `CUSTOMER_LOYALTY_LOG` (
     CONSTRAINT fk_loyalty_customer FOREIGN KEY (customer_id)    REFERENCES `CUSTOMER` (id),
     CONSTRAINT fk_loyalty_tx       FOREIGN KEY (transaction_id) REFERENCES `TRANSACTION` (id),
     CONSTRAINT fk_loyalty_user     FOREIGN KEY (created_by)     REFERENCES `USER` (id),
-    CONSTRAINT idx_loyalty_customer INDEX (customer_id, created_at)
+    INDEX idx_loyalty_customer (customer_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 CREATE TABLE `NOTIFICATION` (
@@ -315,5 +315,5 @@ CREATE TABLE `NOTIFICATION` (
     is_read      BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_notification PRIMARY KEY (id),
-    CONSTRAINT idx_notification_audience INDEX (audience, is_read, created_at)
+    INDEX idx_notification_audience (audience, is_read, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;

@@ -123,11 +123,13 @@ pub async fn list_products(
     .to_string();
 
     let mut rows_query = sqlx::query_as::<_, ProductRow>(sqlx::AssertSqlSafe(rows_sql.clone()));
-    for bind in &binds {
-        rows_query = rows_query.bind(bind);
-    }
+    // The store placeholder sits in the SELECT's stock subquery, which comes
+    // before the WHERE clause placeholders — it must be bound first.
     if let Some(store_id) = &store_id {
         rows_query = rows_query.bind(store_id);
+    }
+    for bind in &binds {
+        rows_query = rows_query.bind(bind);
     }
     let rows = rows_query
         .bind(per_page)

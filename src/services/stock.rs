@@ -453,6 +453,32 @@ pub async fn apply_adjustment(
         return Err(AppError::bad_request("delta must not be zero"));
     }
 
+    // Validate ids first so invalid ones surface as 404 instead of FK
+    // violations (positive delta) or "Insufficient stock" (negative delta).
+    let store = sqlx::query_scalar::<_, i64>("SELECT CAST(1 AS SIGNED) FROM `STORE` WHERE id = ?")
+        .bind(&input.store_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(AppError::db)?;
+    if store.is_none() {
+        return Err(AppError::not_found(format!(
+            "Store {} not found",
+            input.store_id
+        )));
+    }
+    let product =
+        sqlx::query_scalar::<_, i64>("SELECT CAST(1 AS SIGNED) FROM `PRODUCT` WHERE id = ?")
+            .bind(&input.product_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(AppError::db)?;
+    if product.is_none() {
+        return Err(AppError::not_found(format!(
+            "Product {} not found",
+            input.product_id
+        )));
+    }
+
     if input.delta > 0 {
         let unit_cost: Decimal =
             sqlx::query_scalar("SELECT cost_price FROM `PRODUCT` WHERE id = ?")
@@ -505,7 +531,33 @@ pub async fn apply_transfer(
         return Err(AppError::bad_request("quantity must be positive"));
     }
 
-    consume_batches(
+    // Validate both stores (and the product) first, so invalid ids surface as
+    // 404 instead of FK violations or a misleading "Insufficient stock".
+    for store_id in [&input.from_store_id, &input.to_store_id] {
+        let store =
+            sqlx::query_scalar::<_, i64>("SELECT CAST(1 AS SIGNED) FROM `STORE` WHERE id = ?")
+                .bind(store_id)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(AppError::db)?;
+        if store.is_none() {
+            return Err(AppError::not_found(format!("Store {store_id} not found")));
+        }
+    }
+    let product =
+        sqlx::query_scalar::<_, i64>("SELECT CAST(1 AS SIGNED) FROM `PRODUCT` WHERE id = ?")
+            .bind(&input.product_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(AppError::db)?;
+    if product.is_none() {
+        return Err(AppError::not_found(format!(
+            "Product {} not found",
+            input.product_id
+        )));
+    }
+
+    let (_, average_unit_cost) = consume_batches(
         &mut *conn,
         &input.product_id,
         &input.from_store_id,
@@ -519,13 +571,14 @@ pub async fn apply_transfer(
         &input.from_store_id,
         "TRANSFER_OUT",
         input.quantity,
-        Decimal::ZERO,
+        average_unit_cost,
         input.reason.as_deref(),
         Some(caused_by),
     )
     .await?;
 
-    // One fresh destination batch summarising the transfer.
+    // One fresh destination batch summarising the transfer, valued at the
+    // average cost of the consumed lots (keeps inventory valuation correct).
     sqlx::query(
         "INSERT INTO `STOCK_BATCH`
          (id, product_id, store_id, quantity, unit_cost, batch_code, received_at, created_at)
@@ -535,7 +588,7 @@ pub async fn apply_transfer(
     .bind(&input.product_id)
     .bind(&input.to_store_id)
     .bind(input.quantity)
-    .bind(Decimal::ZERO)
+    .bind(average_unit_cost)
     .bind(now())
     .bind(now())
     .execute(&mut *conn)
@@ -548,7 +601,7 @@ pub async fn apply_transfer(
         &input.to_store_id,
         "TRANSFER_IN",
         input.quantity,
-        Decimal::ZERO,
+        average_unit_cost,
         input.reason.as_deref(),
         Some(caused_by),
     )

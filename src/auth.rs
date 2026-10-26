@@ -151,7 +151,7 @@ impl AuthenticatedUser {
 
     /// Staff = every role except portal suppliers.
     pub fn ensure_staff(&self) -> Result<(), AppError> {
-        self.ensure_role(&Role::ALL)
+        self.ensure_role(&Role::STAFF)
     }
 }
 

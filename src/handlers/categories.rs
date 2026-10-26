@@ -102,6 +102,16 @@ pub async fn delete_category(
     user.ensure_role(&[Role::Admin, Role::Manager, Role::InventoryManager])?;
     let id = path.into_inner();
 
+    let exists =
+        sqlx::query_scalar::<_, i64>("SELECT CAST(1 AS SIGNED) FROM `CATEGORY` WHERE id = ?")
+            .bind(&id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(AppError::db)?;
+    if exists.is_none() {
+        return Err(AppError::not_found("Category not found"));
+    }
+
     let in_use: i64 =
         sqlx::query_scalar("SELECT CAST(COUNT(*) AS SIGNED) FROM `PRODUCT` WHERE category_id = ?")
             .bind(&id)
@@ -111,6 +121,19 @@ pub async fn delete_category(
     if in_use > 0 {
         return Err(AppError::conflict(
             "category still has products; reassign them first",
+        ));
+    }
+
+    // Children reference this parent; deleting would hit the FK as a raw 500.
+    let children: i64 =
+        sqlx::query_scalar("SELECT CAST(COUNT(*) AS SIGNED) FROM `CATEGORY` WHERE parent_id = ?")
+            .bind(&id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(AppError::db)?;
+    if children > 0 {
+        return Err(AppError::conflict(
+            "category still has subcategories; reassign them first",
         ));
     }
 
