@@ -98,7 +98,7 @@ pub async fn create_customer(
 
     let row = sqlx::query_as::<_, CustomerRow>(
         "SELECT c.id, c.name, c.phone, c.email, c.loyalty_points, c.is_member, c.created_at,
-                CAST(0 AS SIGNED) AS total_spent
+                CAST(0 AS DECIMAL(14,2)) AS total_spent
          FROM `CUSTOMER` c WHERE c.id = ?",
     )
     .bind(&customer_id)
@@ -120,7 +120,7 @@ pub async fn update_customer(
 
     let existing = sqlx::query_as::<_, CustomerRow>(
         "SELECT c.id, c.name, c.phone, c.email, c.loyalty_points, c.is_member, c.created_at,
-                CAST(0 AS SIGNED) AS total_spent
+                CAST(0 AS DECIMAL(14,2)) AS total_spent
          FROM `CUSTOMER` c WHERE c.id = ?",
     )
     .bind(&id)
@@ -143,7 +143,7 @@ pub async fn update_customer(
 
     let row = sqlx::query_as::<_, CustomerRow>(
         "SELECT c.id, c.name, c.phone, c.email, c.loyalty_points, c.is_member, c.created_at,
-                CAST(0 AS SIGNED) AS total_spent
+                CAST(0 AS DECIMAL(14,2)) AS total_spent
          FROM `CUSTOMER` c WHERE c.id = ?",
     )
     .bind(&id)
