@@ -105,7 +105,6 @@ pub async fn update_user(
     if target.role == "ADMIN" && !matches!(user.role(), Ok(Role::Admin)) {
         return Err(AppError::forbidden("managers cannot modify admin accounts"));
     }
-
     let role = match &body.role {
         Some(role) => Role::parse_or(role)
             .map_err(AppError::bad_request)?
@@ -113,6 +112,13 @@ pub async fn update_user(
             .to_string(),
         None => target.role.clone(),
     };
+    // Mirror the register rules: only admins may grant ADMIN or SUPPLIER, so
+    // a manager can never escalate an account (or their own) into them.
+    if (role == "ADMIN" || role == "SUPPLIER") && !matches!(user.role(), Ok(Role::Admin)) {
+        return Err(AppError::forbidden(
+            "only admins can assign ADMIN or SUPPLIER roles",
+        ));
+    }
     let account_status = match &body.account_status {
         Some(status) if ["ACTIVE", "SUSPENDED", "PENDING"].contains(&status.as_str()) => {
             status.clone()
